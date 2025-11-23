@@ -15,4 +15,7 @@ export class Workflow {
 
     @OneToMany(() => Task, task => task.workflow)
     tasks!: Task[];
+
+    @Column({ nullable: true })
+    finalResult?: string;
 }

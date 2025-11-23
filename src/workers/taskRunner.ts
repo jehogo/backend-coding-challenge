@@ -150,6 +150,25 @@ export class TaskRunner {
                 currentWorkflow.status = WorkflowStatus.InProgress;
             }
 
+            if (totalTasks === Number(totalCompleted) + Number(totalFailed)) {
+                if (allCompleted) {
+                    currentWorkflow.finalResult = `Workflow finished with ${totalCompleted} task(s) completed.`;
+                } else {
+                    currentWorkflow.finalResult = `Workflow finished with ${totalCompleted} task(s) completed and ${totalFailed} task(s) failed. `;
+                    const resultRepository = this.taskRepository.manager.getRepository(Result);
+                    for (const t of currentWorkflow.tasks) {
+                        if (t.status === TaskStatus.Failed) {
+                            const taskResult = await resultRepository.findOne({ where: { taskId: t.taskId } });
+                            if (taskResult) {
+                                const taskResultData = JSON.parse(taskResult.data || '{}');
+                                currentWorkflow.finalResult += `Task ${t.taskId} failed with ${taskResultData.output}. `;
+                            } 
+                        }
+                    }
+                    console.log('currentWorkflow.finalResult', currentWorkflow.finalResult); // TODO: delete this log
+                }
+            }
+
             // Check if all taks are blocked, to unblock them or mark the workflow as failed
             if (currentWorkflow.status === WorkflowStatus.InProgress && totalBlocked > 0 && (totalBlocked + totalCompleted + totalFailed === totalTasks)) {
                 const blockedTasks = currentWorkflow.tasks.filter(t => t.status === TaskStatus.Blocked);
