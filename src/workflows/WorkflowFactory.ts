@@ -62,6 +62,7 @@ export class WorkflowFactory {
 
         const savedTasks = await taskRepository.save(tasks);
 
+        // Update the task relationships with the dependencies
         const tasksWithDependencies: Task[] = [];
         for (const task of savedTasks) {
            task.status = TaskStatus.Queued;
@@ -70,6 +71,8 @@ export class WorkflowFactory {
                 const dependencyTask = await taskRepository.findOne({ where: { stepNumber: dependencyStepNumber } });
                 if (dependencyTask) {
                     task.dependency = dependencyTask;
+                } else {
+                    throw new Error(`Dependency task ${dependencyStepNumber} not found`);
                 }
                 tasksWithDependencies.push(task);
             } else {
