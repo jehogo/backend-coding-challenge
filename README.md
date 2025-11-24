@@ -1,6 +1,23 @@
 # Backend Coding Challenge
 
-## Getting Started
+## Table of Contents
+
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+  - [Running the Application](#running-the-application)
+- [Available Functions](#available-functions)
+  - [Polygon Area Task](#1-polygon-area-task)
+  - [Report Generation](#2-report-generation)
+- [API Documentation](#api-documentation)
+  - [POST /analysis](#post-analysis)
+  - [GET /workflow/:id/status](#get-workflowidstatus)
+  - [GET /workflow/:id/results](#get-workflowidresults)
+
+## Overview
 
 This repository demonstrates a backend architecture that handles asynchronous tasks, workflows, and job execution using TypeScript, Express.js, and TypeORM. The project showcases how to:
 
@@ -14,9 +31,9 @@ This repository demonstrates a backend architecture that handles asynchronous ta
 1. **Entity Modeling with TypeORM**
 
    - **Task Entity:** Represents an individual unit of work with attributes like `taskType`, `status`, `progress`, and references to a `Workflow`. 
-   Furthermore, one Task entity could be preceded by another task.
+   Tasks can have dependencies, where one task can be preceded by another task, enabling sequential execution.
    - **Workflow Entity:** Groups multiple tasks into a defined sequence or steps, allowing complex multi-step processes.
-   Each workflow save the result in its `finalResult` attribute.
+   Each workflow saves the result in its `finalResult` attribute.
 
 2. **Workflow Creation from YAML**
 
@@ -101,8 +118,8 @@ npm install
    - Confirm database settings (e.g. SQLite file path).
 
 4. **Create or Update the Workflow YAML:**
-   - Place a YAML file (e.g. `example_workflow.yml`) in a `workflows/` directory.
-   - Define steps, for example:
+   - Place a YAML file (e.g. `example_workflow.yml`) in the `src/workflows/` directory.
+   - Define steps with task types and step numbers. Example:
      ```yaml
      name: "example_workflow"
      steps:
@@ -110,9 +127,9 @@ npm install
          stepNumber: 1
        - taskType: "notification"
          stepNumber: 2
-      - taskType: "polygonArea"
+       - taskType: "polygonArea"
          stepNumber: 3
-      - taskType: "reportGeneration"
+       - taskType: "reportGeneration"
          stepNumber: 4
      ```
 
@@ -132,36 +149,36 @@ npm start
 
 If using `ts-node`, this will start the Express.js server and the background worker after database initialization.
 
-3. **Create a Workflow (e.g. via `/analysis`):**
+3. **Create a Workflow:**
 
-See the `/analysis` endpoint documentation.
+Use the `/analysis` endpoint to create a new workflow. See the [API Documentation](#api-documentation) section for details.
 
 4. **Check Logs:**
    - The worker picks up tasks from `queued` state.
    - `TaskRunner` runs the corresponding job (e.g., data analysis, email notification) and updates states.
    - Once tasks are done, the workflow is marked as `completed`.
 
-## **Available Functions**
+## Available Functions
 
-Teh following tasks were developed for the coding challenge:
+The following tasks were developed for the coding challenge:
 
-### **1. Polygon area task**
+### 1. Polygon Area Task
 
 This job is responsible for calculating the area of a polygon based on the GeoJSON data provided in the task.
-The implementation is in the `src/jobs/PolygonAreaJob.ts` file and it's based on `@turf/area` library.
-It only calculate the are for `Polygon` and `MultiPolygon` type data.
+The implementation is in the `src/jobs/PolygonAreaJob.ts` file and it's based on the `@turf/area` library.
+It only calculates the area for `Polygon` and `MultiPolygon` type data.
 
-To use it configure the workflow YAML file and create the workflow via `/analysis` endpoint (already explained).
+To use it, configure the workflow YAML file and create the workflow via the `/analysis` endpoint (see [API Documentation](#api-documentation)).
 
-If there is a error with the used GeoJSON data, the job will fail and the task will be marked as `failed`.
-The result will be saved in the task and showed in your console.
+If there is an error with the used GeoJSON data, the job will fail and the task will be marked as `failed`.
+The result will be saved in the task and displayed in your console.
 
-#### **2. Generate a report**
+### 2. Report Generation
 
 The `ReportGenerationJob` is responsible for generating a consolidated JSON report by aggregating the outputs of all tasks executed previously in the workflow.
-The implementation can be found in: `src/jobs/ReportGenerationJob.ts`.
+The implementation can be found in `src/jobs/ReportGenerationJob.ts`.
 
-The job iterates through all tasks preceding it in the workflow and extracts the following data from each completed task: `taskId`, `type` and `output` (the result produced by the task). These are aggregated into a structured JSON report.
+The job iterates through all tasks preceding it in the workflow and extracts the following data from each completed task: `taskId`, `type`, and `output` (the result produced by the task). These are aggregated into a structured JSON report.
 
 An example of the generated report structure:
 
@@ -188,13 +205,13 @@ The report will only be generated if all preceding tasks have been completed (ei
 If one or more preceding tasks are not completed, the job will fail and an error will be thrown. 
 The error message will explicitly list the identifiers of the affected tasks so the workflow can be corrected or retried.
 
-## **Available API**
+## API Documentation
 
 This section describes the available endpoints to generate a workflow, query the status and results of a workflow.
 
-### **[POST] /analysis**
+### POST /analysis
 
-This will read the configured workflow YAML, create a workflow and tasks, and queue them for processing.
+Creates a new workflow by reading the configured workflow YAML file, creating workflow and task entities, and queueing them for processing.
 
 ```bash
 curl -X POST http://localhost:3000/analysis \
@@ -231,14 +248,14 @@ curl -X POST http://localhost:3000/analysis \
    }'
 ```
 
-### **[GET] /workflow/:id/status**
+### GET /workflow/:id/status
 
-Retrieve the current status of a workflow. This endpoint returns the execution status of the workflow, including how many tasks have completed, failed, and the total tasks.
+Retrieves the current status of a workflow. This endpoint returns the execution status of the workflow, including how many tasks have completed, failed, and the total number of tasks.
 
 This endpoint is intended to be used after triggering a workflow via the `/analysis` endpoint. 
 Make sure you keep the workflow identifier printed in your console when the workflow starts.
 
-**Example request**
+**Request Example**
 
 ```bash 
 curl -X GET "http://localhost:3000/workflow/<workflow-id>/status" \
@@ -246,35 +263,35 @@ curl -X GET "http://localhost:3000/workflow/<workflow-id>/status" \
 -H "Content-Type: application/json"
 ```
 
-**Successful response (200)**
+**Response (200 OK)**
 
 ```json
 {
    "workflowId": "<workflow-id>",
    "status": "<workflow-status>",
    "completedTasks": <total-completed-task>,
-   "failedTasks:": <total-failed-task>,
+   "failedTasks": <total-failed-task>,
    "totalTasks": <total-task>
 }
 ```
 
-**Workflow not found (404)**
+**Error Response (404 Not Found)**
 ```json
 { 
    "message": "Workflow not found"
 }
 ```
 
-### **[GET] /workflow/:id/results**
+### GET /workflow/:id/results
 
-Retrieve the final results of a completed workflow.
+Retrieves the final results of a completed workflow.
 This endpoint returns the final output once all tasks in the workflow have been processed. 
 If any tasks failed, the response will include the corresponding error information.
 
 This endpoint is intended to be used after triggering a workflow via the `/analysis` endpoint. 
 Make sure you keep the workflow identifier printed in your console when the workflow starts.
 
-**Example request**
+**Request Example**
 
 ```bash 
 curl -X GET "http://localhost:3000/workflow/<workflow-id>/results" \
@@ -282,28 +299,29 @@ curl -X GET "http://localhost:3000/workflow/<workflow-id>/results" \
 -H "Content-Type: application/json"
 ```
 
-**Successful response (200)**
+**Response (200 OK)**
 
-If all tasks has been completed successfully, the answer will be:
-
-```json
-{
-   "workflowId": "3433c76d-f226-4c91-afb5-7dfc7accab24",
-   "status": "<status>",
-   "finalResult": "Workflow finished with <n> task(s) completed."
-}
-```
-
-If all tasks has been completed at least one error, the answer will be:
+If all tasks have been completed successfully:
 
 ```json
 {
    "workflowId": "3433c76d-f226-4c91-afb5-7dfc7accab24",
    "status": "completed",
-   "finalResult": "Workflow finished with <n> task(s) completed and <n>> task(s) failed. Errors: <errors>."
+   "finalResult": "Workflow finished with <n> task(s) completed."
 }
 ```
-**Workflow Not Found (404)**
+
+If at least one task has failed:
+
+```json
+{
+   "workflowId": "3433c76d-f226-4c91-afb5-7dfc7accab24",
+   "status": "completed",
+   "finalResult": "Workflow finished with <n> task(s) completed and <n> task(s) failed. Errors: <errors>."
+}
+```
+
+**Error Response (404 Not Found)**
 
 ```json
 {
@@ -311,7 +329,7 @@ If all tasks has been completed at least one error, the answer will be:
 }
 ```
 
-**Workflow Not Completed Yet (400)**
+**Error Response (400 Bad Request)**
 
 ```json
 {
