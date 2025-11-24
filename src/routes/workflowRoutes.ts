@@ -63,8 +63,6 @@ router.get('/:id/results', async (req: any, res: any) => {
             });
         }
 
-        console.log('WORKFLOW STATUS', workflow.status); // TODO: delete this log
-
         if (workflow.status === WorkflowStatus.InProgress || workflow.status === WorkflowStatus.Initial) {
             return res.status(400).json({ 
                 message: 'Workflow is not completed yet' 
