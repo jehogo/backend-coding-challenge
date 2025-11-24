@@ -55,7 +55,7 @@ export class ReportGenerationJob implements Job {
         return  {
             workflowId: workflowId,
             tasks: tasksData,
-            finalReport: `- Tasks completed: ${tasksData.length - countOfTasksErrors}. `+ 
+            finalReport: `Tasks completed: ${tasksData.length - countOfTasksErrors}. `+ 
             `Tasks with errors: ${countOfTasksErrors}. `+ 
             `Total tasks: ${tasksData.length}.`
         };
