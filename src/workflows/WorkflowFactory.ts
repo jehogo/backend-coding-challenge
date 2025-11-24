@@ -39,25 +39,46 @@ export class WorkflowFactory {
         const workflowRepository = this.dataSource.getRepository(Workflow);
         const taskRepository = this.dataSource.getRepository(Task);
         const workflow = new Workflow();
+        const relations: Map<number, number> = new Map();
 
         workflow.clientId = clientId;
         workflow.status = WorkflowStatus.Initial;
 
         const savedWorkflow = await workflowRepository.save(workflow);
-
+        
         const tasks: Task[] = workflowDef.steps.map(step => {
             const task = new Task();
             task.clientId = clientId;
             task.geoJson = geoJson;
-            task.status = TaskStatus.Queued;
+            task.status = TaskStatus.Loaded;
             task.taskType = step.taskType;
             task.stepNumber = step.stepNumber;
             task.workflow = savedWorkflow;
-            task.dependsOn = step.dependsOn;
+            if(step.dependsOn) {
+                relations.set(step.stepNumber, step.dependsOn);
+            }
             return task;
         });
 
-        await taskRepository.save(tasks);
+        const savedTasks = await taskRepository.save(tasks);
+
+        const tasksWithDependencies: Task[] = [];
+        for (const task of savedTasks) {
+           task.status = TaskStatus.Queued;
+            if (relations.has(task.stepNumber)) {
+                const dependencyStepNumber = relations.get(task.stepNumber);
+                const dependencyTask = await taskRepository.findOne({ where: { stepNumber: dependencyStepNumber } });
+                if (dependencyTask) {
+                    task.dependency = dependencyTask;
+                }
+                tasksWithDependencies.push(task);
+            } else {
+                task.dependency = null;
+                tasksWithDependencies.push(task);
+            }
+        }
+
+        await taskRepository.save(tasksWithDependencies);
 
         return savedWorkflow;
     }

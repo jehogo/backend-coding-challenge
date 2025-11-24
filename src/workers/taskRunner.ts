@@ -6,6 +6,7 @@ import {Workflow} from "../models/Workflow";
 import {Result} from "../models/Result";
 
 export enum TaskStatus {
+    Loaded = 'loaded',
     Queued = 'queued',
     InProgress = 'in_progress',
     Completed = 'completed',
@@ -21,22 +22,20 @@ export class TaskRunner {
     
     /**
      * Checks if a cycle is detected in the dependencies of a task.
-     * @param stepNumber - The step number of the task to check for a cycle.
+     * @param task - The task to check for a cycle.
      * @param visitedTasks - The tasks that have been visited to avoid infinite loops.
      * @returns True if a cycle is detected, false otherwise.
      */
-    private async checkDependencyCycle(stepNumber: number, visitedTasks: Set<number> = new Set()): Promise<boolean> {
-        if (visitedTasks.has(stepNumber)) {
+    private async checkDependencyCycle(task: Task, visitedTasks: Set<number> = new Set()): Promise<boolean> {
+        if (visitedTasks.has(task.stepNumber)) {
             return true;
         }
-        visitedTasks.add(stepNumber);
-        const currentTask = await this.taskRepository.findOne({ where: { stepNumber: stepNumber } });
-        if (!currentTask || !currentTask.dependsOn) {
-            return false;
-        }
-        const dependencyTask = await this.taskRepository.findOne({ where: { stepNumber: currentTask.dependsOn } });
-        if (dependencyTask) {
-            return await this.checkDependencyCycle(dependencyTask.stepNumber!, visitedTasks);
+        visitedTasks.add(task.stepNumber);
+        if (task.dependency) {
+            const dependencyTask = await this.taskRepository.findOne({ where: { stepNumber: task.dependency.stepNumber }, relations: ['dependency'] });
+            if (dependencyTask) {
+                return await this.checkDependencyCycle(dependencyTask, visitedTasks);
+            }
         }
         return false;
     }
@@ -61,43 +60,29 @@ export class TaskRunner {
      * @throws If the job fails, it rethrows the error.
      */
     async run(task: Task): Promise<void> {
-        console.log(`Running TASK ${task.taskType} ${task.taskId}... depends on ${task.dependsOn} `);
-
-        if (task.dependsOn) {
-            const dependencyTask = await this.taskRepository.findOne({ where: { stepNumber: task.dependsOn } });
-
-            if (!dependencyTask) {
-                console.log('No se encontró la tarea dependiente', task.dependsOn); // TODO: delete this log
+        // Checking dependency and cycle dependecy
+        if (task.dependency) {
+            const dependencyTask = task.dependency;
+            const isCyclic = await this.checkDependencyCycle(task);
+            if (isCyclic) {
+                console.log(`Cycle dependency detected for task ${task.taskId} [${task.stepNumber}]. Marking task as failed`);
                 task.status = TaskStatus.Failed;
-                await this.generateErrorResult(task, `Dependency "${task.dependsOn}" task not found`);
+                await this.generateErrorResult(task, `Cycle detected in dependency chain of task ${task.taskId}`);
             } else {
-                task.dependency = dependencyTask;
-                const isCyclic = await this.checkDependencyCycle(task.stepNumber!);
-                if (isCyclic) {
-                    console.log('CYCLE DETECTED: Dependencia cíclica detectada. Marcar tarea como fallida', task.taskId); // TODO: delete this log
+                if ([TaskStatus.InProgress, TaskStatus.Queued, TaskStatus.Blocked].includes(dependencyTask.status)) { 
+                    console.log(`Task ${task.taskId} [${task.stepNumber}] is blocked because its dependency "${dependencyTask.stepNumber}" is in progress, queued or blocked`);
+                    task.status = TaskStatus.Blocked;
+                }
+                if (dependencyTask.status === TaskStatus.Failed) {
+                    console.log(`Task ${task.taskId} [${task.stepNumber}] is failed because its dependency "${dependencyTask.stepNumber}" task failed`);
                     task.status = TaskStatus.Failed;
-                    await this.generateErrorResult(task, `Cycle detected in dependencies of task ${task.taskId}`);
-                } else {
-                    if (dependencyTask.status === TaskStatus.InProgress || dependencyTask.status === TaskStatus.Queued || dependencyTask.status === TaskStatus.Blocked) { 
-                        console.log('BLOCKED: La tarea dependiente está en progreso, en cola o bloqueada. Bloquear tarea', task.taskId); // TODO: delete this log
-                        task.status = TaskStatus.Blocked;
-                    }
-                    if (dependencyTask.status === TaskStatus.Failed) {
-                        console.log('FAILED: La tarea dependiente falló. Marcar tarea como fallida', task.taskId); // TODO: delete this log
-                        task.status = TaskStatus.Failed;
-                        await this.generateErrorResult(task, `This task can not be executed because its dependency "${task.dependsOn}" task failed.`);
-                    }
+                    await this.generateErrorResult(task, `This task can not be executed because its dependency "${task.dependency?.stepNumber}" task failed.`);
                 }
             }
             await this.taskRepository.save(task);
         }
 
-        console.log('TASK STATUS', task.status);
-
         if (task.status !== TaskStatus.Blocked && task.status !== TaskStatus.Failed) {
-            
-            console.log('');
-
             task.status = TaskStatus.InProgress;
             task.progress = 'starting job...';
             await this.taskRepository.save(task);
@@ -132,40 +117,33 @@ export class TaskRunner {
         const currentWorkflow = await workflowRepository.findOne({ where: { workflowId: task.workflow.workflowId }, relations: ['tasks'] });
 
         if (currentWorkflow) {
-            console.log('CURRENT WORKFLOW', currentWorkflow.workflowId); // TODO: delete this log
+            currentWorkflow.status = WorkflowStatus.InProgress;
             const allCompleted = currentWorkflow.tasks.every(t => t.status === TaskStatus.Completed);
-            const anyFailed = currentWorkflow.tasks.some(t => t.status === TaskStatus.Failed);
             const totalTasks = currentWorkflow.tasks.length;
             const totalBlocked = currentWorkflow.tasks.filter(t => t.status === TaskStatus.Blocked).length;
             const totalCompleted = currentWorkflow.tasks.filter(t => t.status === TaskStatus.Completed).length;
             const totalFailed = currentWorkflow.tasks.filter(t => t.status === TaskStatus.Failed).length;
 
-            if (anyFailed) {
-                currentWorkflow.status = WorkflowStatus.Failed;
-            } else if (allCompleted) {
-                currentWorkflow.status = WorkflowStatus.Completed;
-            } else {
-                currentWorkflow.status = WorkflowStatus.InProgress;
-            }
-
             if (totalTasks === Number(totalCompleted) + Number(totalFailed)) {
                 if (allCompleted) {
+                    currentWorkflow.status = WorkflowStatus.Completed;
                     currentWorkflow.finalResult = `Workflow finished with ${totalCompleted} task(s) completed.`;
                 } else {
-                    currentWorkflow.finalResult = `Workflow finished with ${totalCompleted} task(s) completed and ${totalFailed} task(s) failed. `;
+                    currentWorkflow.status = WorkflowStatus.Failed;
+                    currentWorkflow.finalResult = `Workflow finished with ${totalCompleted} task(s) completed and ${totalFailed} task(s) failed. Errors: `;
                     const resultRepository = this.taskRepository.manager.getRepository(Result);
                     for (const t of currentWorkflow.tasks) {
                         if (t.status === TaskStatus.Failed) {
                             const taskResult = await resultRepository.findOne({ where: { taskId: t.taskId } });
                             if (taskResult) {
                                 const taskResultData = JSON.parse(taskResult.data || '{}');
-                                currentWorkflow.finalResult += `Task ${t.taskId} failed with ${taskResultData.output}. `;
+                                currentWorkflow.finalResult += ` Task ${t.taskId} failed with ${taskResultData.output}.`;
                             } 
                         }
                     }
-                    console.log('currentWorkflow.finalResult', currentWorkflow.finalResult); // TODO: delete this log
                 }
-                await workflowRepository.save(currentWorkflow); // TODO: check if this is needed
+                console.log('');
+                console.log(`Workflow ${currentWorkflow.workflowId} fisnished with final result: ${currentWorkflow.finalResult}`);
             }
 
             // Check if all taks are blocked, to unblock them or mark the workflow as failed
@@ -179,5 +157,7 @@ export class TaskRunner {
 
             await workflowRepository.save(currentWorkflow);
         }
+
+        console.log('');
     }
 }
