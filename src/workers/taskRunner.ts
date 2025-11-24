@@ -72,9 +72,7 @@ export class TaskRunner {
                 await this.generateErrorResult(task, `Dependency "${task.dependsOn}" task not found`);
             } else {
                 task.dependency = dependencyTask;
-
                 const isCyclic = await this.checkDependencyCycle(task.stepNumber!);
-
                 if (isCyclic) {
                     console.log('CYCLE DETECTED: Dependencia cíclica detectada. Marcar tarea como fallida', task.taskId); // TODO: delete this log
                     task.status = TaskStatus.Failed;
@@ -84,7 +82,6 @@ export class TaskRunner {
                         console.log('BLOCKED: La tarea dependiente está en progreso, en cola o bloqueada. Bloquear tarea', task.taskId); // TODO: delete this log
                         task.status = TaskStatus.Blocked;
                     }
-    
                     if (dependencyTask.status === TaskStatus.Failed) {
                         console.log('FAILED: La tarea dependiente falló. Marcar tarea como fallida', task.taskId); // TODO: delete this log
                         task.status = TaskStatus.Failed;
@@ -135,6 +132,7 @@ export class TaskRunner {
         const currentWorkflow = await workflowRepository.findOne({ where: { workflowId: task.workflow.workflowId }, relations: ['tasks'] });
 
         if (currentWorkflow) {
+            console.log('CURRENT WORKFLOW', currentWorkflow.workflowId); // TODO: delete this log
             const allCompleted = currentWorkflow.tasks.every(t => t.status === TaskStatus.Completed);
             const anyFailed = currentWorkflow.tasks.some(t => t.status === TaskStatus.Failed);
             const totalTasks = currentWorkflow.tasks.length;
@@ -167,6 +165,7 @@ export class TaskRunner {
                     }
                     console.log('currentWorkflow.finalResult', currentWorkflow.finalResult); // TODO: delete this log
                 }
+                await workflowRepository.save(currentWorkflow); // TODO: check if this is needed
             }
 
             // Check if all taks are blocked, to unblock them or mark the workflow as failed
